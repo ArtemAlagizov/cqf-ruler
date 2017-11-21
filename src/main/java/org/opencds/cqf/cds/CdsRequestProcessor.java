@@ -14,7 +14,7 @@ import java.util.List;
 
 public abstract class CdsRequestProcessor implements Processor {
     CdsHooksRequest request;
-    PlanDefinition planDefinition;
+    private PlanDefinition planDefinition;
     LibraryResourceProvider libraryResourceProvider;
 
     CdsRequestProcessor(CdsHooksRequest request, PlanDefinition planDefinition, LibraryResourceProvider libraryResourceProvider) {
