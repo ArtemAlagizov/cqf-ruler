@@ -15,12 +15,16 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.opencds.cqf.builders.PatientBuilder;
 import org.opencds.cqf.cql.data.fhir.BaseFhirDataProvider;
 import org.opencds.cqf.cql.data.fhir.FhirDataProviderStu3;
 import org.opencds.cqf.cql.execution.Context;
 import org.opencds.cqf.cql.execution.CqlLibraryReader;
 import org.opencds.cqf.cql.terminology.fhir.FhirTerminologyProvider;
 import org.opencds.cqf.helpers.FhirMeasureEvaluator;
+import org.ajbrown.namemachine.Gender;
+import org.ajbrown.namemachine.Name;
+import org.ajbrown.namemachine.NameGenerator;
 
 import javax.xml.bind.JAXBException;
 import java.io.*;
@@ -29,7 +33,14 @@ import java.net.ServerSocket;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.file.Paths;
+import java.text.DateFormat;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.time.ZoneId;
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class RulerTestBase {
     private static IGenericClient ourClient;
@@ -112,9 +123,8 @@ public class RulerTestBase {
         conn.getOutputStream().write(data);
 
         StringBuilder response = new StringBuilder();
-        try(Reader in = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8")))
-        {
-            for (int i; (i = in.read()) >= 0;) {
+        try (Reader in = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+            for (int i; (i = in.read()) >= 0; ) {
                 response.append((char) i);
             }
         }
@@ -136,6 +146,52 @@ public class RulerTestBase {
     }
 
     @Test
+    public void PatientBuilder() {
+
+        NameGenerator generator = new NameGenerator();
+
+        List<Name> names = generator.generateNames(10, Gender.MALE);
+
+        List<Patient> patients = names
+                .stream()
+                .map(name -> {
+                    PatientBuilder builder = new PatientBuilder();
+                    HumanName humanName = new HumanName();
+                    LocalDate from = LocalDate.of(1970, 1, 1);
+                    LocalDate to = LocalDate.of(2000, 1, 1);
+                    long days = from.until(to, ChronoUnit.DAYS);
+                    long randomDays = ThreadLocalRandom.current().nextLong(days + 1);
+                    LocalDate randomDate = from.plusDays(randomDays);
+                    Date date = Date.from(randomDate.atStartOfDay(ZoneId.systemDefault()).toInstant());
+                    List<StringType> givenNames = Stream.of(new StringType(name.getFirstName())).collect(Collectors.toList());
+
+                    humanName.setGiven(givenNames);
+                    humanName.setFamily(name.getLastName());
+
+                    builder.buildName(humanName);
+                    builder.buildGender(Enumerations.AdministrativeGender.MALE);
+                    builder.buildBirthDate(date);
+
+                    return builder.build();
+                })
+                .collect(Collectors.toCollection(ArrayList::new));
+
+        patients
+                .forEach(patient -> {
+                    System.out.println("----------------------------------------------------------");
+                    System.out.println("Birth date: " + DateFormat.getDateTimeInstance().format(patient.getBirthDate()));
+                    System.out.println("Gender: " + patient.getGender());
+
+                    patient.getName()
+                            .forEach(humanName -> System.out.println("Name: " + humanName.getGiven() + " "
+                                    + humanName.getFamily()));
+                });
+
+        Assert.assertTrue(patients.size() == 10);
+        Assert.assertTrue((patients.get(0).getName().get(0).getFamily()).equals(names.get(0).getLastName()));
+    }
+
+    @Test
     public void MeasureProcessingTest() {
         putResource("measure-processing-library.json", "col-logic");
         putResource("measure-processing-measure.json", "col");
@@ -148,6 +204,7 @@ public class RulerTestBase {
         putResource("measure-processing-valueset-5.json", "2.16.840.1.113883.3.464.1003.198.12.1011");
 
         Parameters inParams = new Parameters();
+
         inParams.addParameter().setName("patient").setValue(new StringType("Patient-12214"));
         inParams.addParameter().setName("startPeriod").setValue(new DateType("2001-01-01"));
         inParams.addParameter().setName("endPeriod").setValue(new DateType("2015-03-01"));
